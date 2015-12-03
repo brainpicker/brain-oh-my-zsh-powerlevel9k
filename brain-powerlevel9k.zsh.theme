@@ -191,57 +191,6 @@ if [[ -n $POWERLEVEL9K_VCS_DARK_FOREGROUND ]]; then
 fi
 
 ################################################################
-# VCS Information Settings
-################################################################
-
-setopt prompt_subst
-autoload -Uz vcs_info
-
-VCS_WORKDIR_DIRTY=false
-VCS_CHANGESET_PREFIX=''
-if [[ "$POWERLEVEL9K_SHOW_CHANGESET" == true ]]; then
-  # Default: Just display the first 12 characters of our changeset-ID.
-  local VCS_CHANGESET_HASH_LENGTH=12
-  if [[ -n "$POWERLEVEL9K_CHANGESET_HASH_LENGTH" ]]; then
-    VCS_CHANGESET_HASH_LENGTH="$POWERLEVEL9K_CHANGESET_HASH_LENGTH"
-  fi
-
-  VCS_CHANGESET_PREFIX="%F{$VCS_FOREGROUND_COLOR_DARK}$VCS_COMMIT_ICON%0.$VCS_CHANGESET_HASH_LENGTH""i%f "
-fi
-
-    zstyle ':vcs_info:*' enable git hg
-    zstyle ':vcs_info:*' check-for-changes true
-
-# save time by ignoring all this if git isn't enabled for this directory
-if $(git status >/dev/null 2>&1); then
-
-    VCS_DEFAULT_FORMAT="$VCS_CHANGESET_PREFIX%F{$VCS_FOREGROUND_COLOR}%b%c%u%m%f"
-    zstyle ':vcs_info:git:*' formats "%F{$VCS_FOREGROUND_COLOR}$VCS_GIT_ICON%f$VCS_DEFAULT_FORMAT"
-    zstyle ':vcs_info:hg:*' formats "%F{$VCS_FOREGROUND_COLOR}$VCS_HG_ICON%f$VCS_DEFAULT_FORMAT"
-
-
-    zstyle ':vcs_info:*' actionformats " %b %F{red}| %a%f"
-
-    zstyle ':vcs_info:*' stagedstr " %F{$VCS_FOREGROUND_COLOR}$VCS_STAGED_ICON%f"
-    zstyle ':vcs_info:*' unstagedstr " %F{$VCS_FOREGROUND_COLOR}$VCS_UNSTAGED_ICON%f"
-
-    zstyle ':vcs_info:git*+set-message:*' hooks vcs-detect-changes git-untracked git-aheadbehind git-stash git-remotebranch git-tagname
-    zstyle ':vcs_info:hg*+set-message:*' hooks vcs-detect-changes
-
-    # For Hg, only show the branch name
-    zstyle ':vcs_info:hg*:*' branchformat "$VCS_BRANCH_ICON%b"
-    # The `get-revision` function must be turned on for dirty-check to work for Hg
-    zstyle ':vcs_info:hg*:*' get-revision true
-    zstyle ':vcs_info:hg*:*' get-bookmarks true
-    zstyle ':vcs_info:hg*+gen-hg-bookmark-string:*' hooks hg-bookmarks
-
-    if [[ "$POWERLEVEL9K_SHOW_CHANGESET" == true ]]; then
-      zstyle ':vcs_info:*' get-revision true
-    fi
-
-fi
-
-################################################################
 # Prompt Segment Constructors
 ################################################################
 
@@ -330,6 +279,45 @@ function in_git() {
   return 1
 }
 
+prompt_git() {
+    if $in_git; then
+        prompt_git_status "right"
+        prompt_git_branch "right"
+    fi
+}
+
+prompt_git_status() {
+    local ahead behind
+    local -a git_status
+
+    branch_name=${$(git symbolic-ref --short HEAD 2>/dev/null)}
+
+    # for git prior to 1.7
+    # ahead=$(git rev-list origin/${branch_name}..HEAD | wc -l)
+    ahead=$(git rev-list ${branch_name}@{upstream}..HEAD 2>/dev/null | wc -l)
+    (( $ahead )) && git_status+=( "$VCS_OUTGOING_CHANGES${ahead// /}%f" )
+
+    # for git prior to 1.7
+    # behind=$(git rev-list HEAD..origin/${branch_name} | wc -l)
+    behind=$(git rev-list HEAD..${branch_name}@{upstream} 2>/dev/null | wc -l)
+    (( $behind )) && git_status+=( "$VCS_INCOMING_CHANGES${behind// /}%f" )
+
+    if [ ! -z "$git_status" ]; then
+        $1_prompt_segment "$0" red white "$git_status"
+    fi
+}
+
+prompt_git_branch() {
+    local branch_name=${$(git symbolic-ref --short HEAD 2>/dev/null)}
+    if [ -n "$branch_name" ]; then
+        if  [ "$branch_name" != "$SVNSHELL_BRANCH_CURRENT" ] ;
+        then
+            export GITSHELL_BRANCH_PREV=$GITSHELL_BRANCH_CURRENT
+            export GITSHELL_BRANCH_CURRENT=$branch_NAME
+        fi
+    fi
+    $1_prompt_segment "$0" green black "$VCS_REMOTE_BRANCH_ICON $branch_name "
+}
 
 prompt_vcs() {
   local vcs_prompt="${vcs_info_msg_0_}"
@@ -350,25 +338,6 @@ function +vi-git-untracked() {
             ${$(git ls-files --others --exclude-standard | sed q | wc -l)// /} != 0 ]]; then
         hook_com[unstaged]+=" %F{$VCS_FOREGROUND_COLOR}$VCS_UNTRACKED_ICON%f"
     fi
-}
-
-function +vi-git-aheadbehind() {
-    local ahead behind branch_name
-    local -a gitstatus
-
-    branch_name=${$(git symbolic-ref --short HEAD 2>/dev/null)}
-
-    # for git prior to 1.7
-    # ahead=$(git rev-list origin/${branch_name}..HEAD | wc -l)
-    ahead=$(git rev-list ${branch_name}@{upstream}..HEAD 2>/dev/null | wc -l)
-    (( $ahead )) && gitstatus+=( " %F{$VCS_FOREGROUND_COLOR}$VCS_OUTGOING_CHANGES${ahead// /}%f" )
-
-    # for git prior to 1.7
-    # behind=$(git rev-list HEAD..origin/${branch_name} | wc -l)
-    behind=$(git rev-list HEAD..${branch_name}@{upstream} 2>/dev/null | wc -l)
-    (( $behind )) && gitstatus+=( " %F{$VCS_FOREGROUND_COLOR}$VCS_INCOMING_CHANGES${behind// /}%f" )
-
-    hook_com[misc]+=${(j::)gitstatus}
 }
 
 function +vi-git-remotebranch() {
@@ -402,26 +371,6 @@ function +vi-git-stash() {
   if [[ -s $(git rev-parse --git-dir)/refs/stash ]] ; then
     stashes=$(git stash list 2>/dev/null | wc -l)
     hook_com[misc]+=" %F{$VCS_FOREGROUND_COLOR}$VCS_STASH_ICON${stashes// /}%f"
-  fi
-}
-
-function +vi-hg-bookmarks() {
-  if [[ -n "${hgbmarks[@]}" ]]; then
-    hook_com[hg-bookmark-string]=" %F{$VCS_FOREGROUND_COLOR}$VCS_BOOKMARK_ICON${hgbmarks[@]}%f"
-
-    # And to signal, that we want to use the sting we just generated,
-    # set the special variable `ret' to something other than the default
-    # zero:
-    ret=1
-    return 0
-  fi
-}
-
-function +vi-vcs-detect-changes() {
-  if [[ -n "${hook_com[staged]}" ]] || [[ -n "${hook_com[unstaged]}" ]]; then
-    VCS_WORKDIR_DIRTY=true
-  else
-    VCS_WORKDIR_DIRTY=false
   fi
 }
 
@@ -642,15 +591,6 @@ function _diff() {
 # right-left but reads the opposite, this isn't necessary for the other side.
 CURRENT_BG='NONE'
 
-# AWS Profile
-prompt_aws() {
-  local aws_profile="$AWS_DEFAULT_PROFILE"
-  if [[ -n "$aws_profile" ]];
-  then
-    $1_prompt_segment "$0" red white "$AWS_ICON $aws_profile"
-  fi
-}
-
 # Context: user@hostname (who am I and where am I)
 # Note that if $DEFAULT_USER is not set, this prompt segment will always print
 prompt_context() {
@@ -675,117 +615,6 @@ prompt_dir() {
   $1_prompt_segment "$0" "blue" "$DEFAULT_COLOR" "$current_path"
 }
 
-# Right Status: (return code, root status, background jobs)
-# This creates a status segment for the *right* prompt. Exact same thing as
-# above - just other side.
-prompt_longstatus() {
-  local symbols bg
-  symbols=()
-
-  if [[ "$RETVAL" -ne 0 ]]; then
-    symbols+="%F{226}%? ↵"
-    bg="009"
-  else
-    symbols+="%{%F{"046"}%}$OK_ICON"
-    bg="008"
-  fi
-
-  [[ "$UID" -eq 0 ]] && symbols+="%{%F{yellow}%} $ROOT_ICON"
-  [[ $(jobs -l | wc -l) -gt 0 ]] && symbols+="%{%F{cyan}%}$BACKGROUND_JOBS_ICON"
-
-  [[ -n "$symbols" ]] && $1_prompt_segment "$0" "$bg" "$DEFAULT_COLOR" "$symbols"
-}
-
-# Node version
-prompt_node_version() {
-  local nvm_prompt=$(node -v 2>/dev/null)
-  [[ -z "${nvm_prompt}" ]] && return
-  NODE_ICON=$'\u2B22' # ⬢
-
-  $1_prompt_segment "$0" "green" "white" "${nvm_prompt:1} $NODE_ICON"
-}
-
-# rbenv information
-prompt_rbenv() {
-  if [[ -n "$RBENV_VERSION" ]]; then
-    $1_prompt_segment "$0" "red" "$DEFAULT_COLOR" "$RBENV_VERSION"
-  fi
-}
-
-# RSpec test ratio
-prompt_rspec_stats() {
-  if [[ (-d app && -d spec) ]]; then
-    local code_amount=$(ls -1 app/**/*.rb | wc -l)
-    local tests_amount=$(ls -1 spec/**/*.rb | wc -l)
-
-    build_test_stats "$1" $0 "$code_amount" $tests_amount "RSpec $TEST_ICON"
-  fi
-}
-
-# Ruby Version Manager information
-prompt_rvm() {
-  local rvm_prompt
-  rvm_prompt=`rvm-prompt`
-  if [ "$rvm_prompt" != "" ]; then
-    $1_prompt_segment "$0" "240" "$DEFAULT_COLOR" "$rvm_prompt $RUBY_ICON "
-  fi
-}
-
-# Left Status: (return code, root status, background jobs)
-# This creates a status segment for the *left* prompt
-prompt_status() {
-  local symbols
-  symbols=()
-  [[ "$RETVAL" -ne 0 ]] && symbols+="%{%F{red}%}$FAIL_ICON"
-  [[ "$UID" -eq 0 ]] && symbols+="%{%F{yellow}%} $ROOT_ICON"
-  [[ $(jobs -l | wc -l) -gt 0 ]] && symbols+="%{%F{cyan}%}$BACKGROUND_JOBS_ICON"
-
-  [[ -n "$symbols" ]] && $1_prompt_segment "$0" "$DEFAULT_COLOR" "default" "$symbols"
-}
-
-# Symfony2-PHPUnit test ratio
-prompt_symfony2_tests() {
-  if [[ (-d src && -d app && -f app/AppKernel.php) ]]; then
-    local code_amount=$(ls -1 src/**/*.php | grep -v Tests | wc -l)
-    local tests_amount=$(ls -1 src/**/*.php | grep Tests | wc -l)
-
-    build_test_stats "$1" "$0" "$code_amount" "$tests_amount" "SF2 $TEST_ICON"
-  fi
-}
-
-# Symfony2-Version
-prompt_symfony2_version() {
-  if [[ -f app/bootstrap.php.cache ]]; then
-    local symfony2_version=$(grep " VERSION " app/bootstrap.php.cache | sed -e 's/[^.0-9]*//g')
-    $1_prompt_segment "$0" "240" "$DEFAULT_COLOR" "$SYMFONY_ICON $symfony2_version"
-  fi
-}
-
-# Show a ratio of tests vs code
-build_test_stats() {
-  local code_amount="$3"
-  local tests_amount="$4"+0.00001
-  local headline="$5"
-
-  # Set float precision to 2 digits:
-  typeset -F 2 ratio
-  local ratio=$(( (tests_amount/code_amount) * 100 ))
-
-  [[ ratio -ge 0.75 ]] && $1_prompt_segment "${2}_GOOD" "cyan" "$DEFAULT_COLOR" "$headline: $ratio%%"
-  [[ ratio -ge 0.5 && ratio -lt 0.75 ]] && $1_prompt_segment "$2_AVG" "yellow" "$DEFAULT_COLOR" "$headline: $ratio%%"
-  [[ ratio -lt 0.5 ]] && $1_prompt_segment "$2_BAD" "red" "$DEFAULT_COLOR" "$headline: $ratio%%"
-}
-
-# Virtualenv: current working virtualenv
-# More information on virtualenv (Python):
-# https://virtualenv.pypa.io/en/latest/
-prompt_virtualenv() {
-  local virtualenv_path="$VIRTUAL_ENV"
-  if [[ -n "$virtualenv_path" && -n "$VIRTUAL_ENV_DISABLE_PROMPT" ]]; then
-    $1_prompt_segment "$0" "blue" "$DEFAULT_COLOR" "(`basename $virtualenv_path`)"
-  fi
-}
-
 ################################################################
 # Prompt processing and drawing
 ################################################################
@@ -795,7 +624,7 @@ build_left_prompt() {
   RETVAL=$?
 
   if [[ "${#POWERLEVEL9K_LEFT_PROMPT_ELEMENTS}" == 0 ]]; then
-    POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir rbenv vcs)
+    POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir)
   fi
 
   for element in $POWERLEVEL9K_LEFT_PROMPT_ELEMENTS; do
@@ -810,7 +639,7 @@ build_right_prompt() {
   RETVAL=$?
 
   if [[ "${#POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS}" == 0 ]]; then
-    POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(longstatus svn)
+    POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(git svn)
   fi
 
   for element in $POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS; do
@@ -825,11 +654,6 @@ powerlevel9k_init() {
 
   # initialize colors
   autoload -U colors && colors
-
-  # initialize VCS
-  autoload -Uz add-zsh-hook
-
-  add-zsh-hook precmd vcs_info
 
   if [[ "$POWERLEVEL9K_PROMPT_ON_NEWLINE" == true ]]; then
     [[ -n $POWERLEVEL9K_MULTILINE_FIRST_PROMPT_PREFIX ]] || POWERLEVEL9K_MULTILINE_FIRST_PROMPT_PREFIX="╭─"
@@ -856,5 +680,8 @@ $POWERLEVEL9K_MULTILINE_SECOND_PROMPT_PREFIX"
 }
 
 export SVNSHELL_BRANCH_PREV=""
+export SVNSHELL_BRANCH_CURRENT=""
+export GITSHELL_BRANCH_PREV=""
+export GITSHELL_BRANCH_CURRENT=""
 
 powerlevel9k_init "$@"
